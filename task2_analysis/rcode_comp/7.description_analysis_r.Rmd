@@ -1,0 +1,184 @@
+---
+title: "Casino Task Analysis (Casinos 2 & 3)"
+author: "fsg" # Kept original author
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r load_and_prepare_data}
+# Ensure required packages are installed and loaded
+packages <- c("dplyr", "ggplot2", "ggpubr", "knitr", "lme4", "lmerTest", "showtext")
+for(pkg in packages){
+  if(!require(pkg, character.only = TRUE)){
+    install.packages(pkg, dependencies = TRUE) # Added dependencies=TRUE
+    library(pkg, character.only = TRUE)
+  }
+}
+
+# Optional Font Setup (uncomment if you have the font and want to use it)
+# showtext_auto(enable = TRUE)
+# tryCatch({
+#   font_add("time", "times.ttf") # Assumes times.ttf is findable or provide full path
+#   font_families()
+#   base_font <- "time"
+# }, warning = function(w) {
+#   print("Warning loading font 'time': Using default sans-serif.")
+#   base_font <- "sans"
+# }, error = function(e) {
+#   print("Error loading font 'time': Using default sans-serif.")
+#   base_font <- "sans"
+# })
+base_font <- "sans" # Defaulting to sans if font setup fails or is commented out
+
+# --- Use the EXACT paths provided ---
+data_file_path <- '/Users/hroyhong/Desktop/llm0412/task1/data/combined_r.csv'
+output_path <- '/Users/hroyhong/Desktop/llm0412/task1/result/' # Ensure trailing slash for paste0
+
+# Load the correct data file
+if (!file.exists(data_file_path)) {
+    stop(paste("Error: File not found ->", data_file_path))
+}
+raw_data <- read.csv(data_file_path)
+
+# Filter data for casinos 2 and 3
+data <- raw_data %>%
+  filter(casino %in% c(2, 3)) %>%
+  mutate(casino_factor = factor(casino, levels=c(2,3), labels=c("Casino 2", "Casino 3")))
+
+# Check filtering
+print(paste("Number of rows after filtering:", nrow(data)))
+print("Casinos included:")
+print(levels(data$casino_factor))
+
+```
+
+```{r cumulative_reward_analysis}
+# Renamed chunk title for clarity
+### Cumulative Reward Analysis (Casinos 2 & 3)
+
+# Calculate cumulative reward per visit for each subject and casino
+dat_cum_reward <- data %>%
+  group_by(subject_id, casino_factor) %>%
+  arrange(visit_in_casino) %>%
+  mutate(cumulative_reward = cumsum(reward)) %>%
+  ungroup()
+
+# Summarize across subjects to get mean and standard error per visit
+dat_summary <- dat_cum_reward %>%
+  group_by(visit_in_casino, casino_factor) %>%
+  summarise(
+    mean_cum_reward = mean(cumulative_reward, na.rm = TRUE),
+    se_cum_reward = sd(cumulative_reward, na.rm = TRUE) / sqrt(n()),
+    .groups = 'drop'
+    )
+
+# --- Plotting (Keeping original theme structure where possible) ---
+cum_reward_plot <- ggplot(dat_summary, aes(x = visit_in_casino, y = mean_cum_reward, col = casino_factor, shape = casino_factor)) +
+  geom_point(size = 1.2) +
+  geom_line(size = 0.8) +
+  geom_errorbar(aes(ymin = mean_cum_reward - se_cum_reward, ymax = mean_cum_reward + se_cum_reward), width=0.2, size = 0.1) +
+  scale_color_manual(name = 'Casino', values = c("Casino 2" = "#88CDF6", "Casino 3" = "#66FF99")) +
+  scale_shape_manual(name = 'Casino', values = c("Casino 2" = 16, "Casino 3" = 17)) +
+  scale_x_continuous(breaks = seq(0, max(dat_summary$visit_in_casino, na.rm=TRUE), by = 5)) +
+  facet_wrap(~casino_factor, nrow = 1, scales = "free_y") +
+  labs(x = 'Visit Number within Casino', y = 'Mean Cumulative Reward', title = NULL) +
+  theme_minimal(base_family = base_font) + # Use defined base_font
+  theme(
+    legend.position = "top", legend.text = element_text(size = 10, face = "bold", family = base_font), # Use base_font
+    legend.title = element_text(size = 12, face = "bold", family = base_font), # Use base_font
+    panel.border = element_blank(), panel.grid.minor = element_blank(),
+    plot.title = element_text(hjust = 0.5, family = base_font), # Use base_font
+    axis.text.x = element_text(size = 10, family = base_font), axis.text.y = element_text(size = 10, family = base_font), # Use base_font
+    axis.title.x = element_text(size = 12, face = "bold", family = base_font), axis.title.y = element_text(size = 12, face = "bold", family = base_font), # Use base_font
+    strip.background = element_rect(color = "white", fill = "white"),
+    strip.text = element_text(size = 12, face = "bold", family = base_font), # Use base_font
+    axis.line = element_line(colour = "black"),
+    axis.title = element_text(size = 12, face = "bold", family = base_font) # Use base_font
+  )
+
+# Display the plot
+print(cum_reward_plot)
+
+# Save the plot using the specified output path
+ggsave(plot = cum_reward_plot, filename = paste0(output_path, 'casino_2_3_cumulative_reward.pdf'), width = 7, height = 4)
+# Optional PNG save
+# ggsave(plot = cum_reward_plot, filename = paste0(output_path, 'casino_2_3_cumulative_reward.png'), width = 7, height = 4, dpi=300)
+
+```
+
+```{r}
+# --- New Analysis: Proportion Choosing High-Probability Machine ---
+
+# Define which machine is high probability for each relevant casino
+data <- data %>%
+  mutate(
+    is_high_prob = case_when(
+      casino == 2 & chosen_machine_label == "T" ~ TRUE,
+      casino == 2 & chosen_machine_label == "M" ~ FALSE,
+      casino == 3 & chosen_machine_label == "Q" ~ TRUE,
+      casino == 3 & chosen_machine_label == "C" ~ FALSE,
+      TRUE ~ NA # Should not happen for casinos 2/3
+    ),
+    chose_high_prob = ifelse(is_high_prob, 1, 0)
+  )
+
+# Calculate the running proportion of choosing the high-probability machine
+dat_prop_choice <- data %>%
+  filter(!is.na(chose_high_prob)) %>% # Remove any rows where choice couldn't be determined
+  group_by(subject_id, casino_factor) %>%
+  arrange(visit_in_casino) %>%
+  mutate(
+    cumulative_high_prob = cumsum(chose_high_prob),
+    # This is the running accuracy (proportion) up to this visit
+    prop_high_prob = cumulative_high_prob / visit_in_casino
+    ) %>%
+  ungroup()
+
+# Summarize across subjects
+dat_summary_prop <- dat_prop_choice %>%
+  group_by(visit_in_casino, casino_factor) %>%
+  summarise(
+    # Renamed to reflect proportion/accuracy
+    mean_prop = mean(prop_high_prob, na.rm = TRUE),
+    se_prop = sd(prop_high_prob, na.rm = TRUE) / sqrt(n()),
+    .groups = 'drop'
+    )
+
+# --- Plotting (Adapted from original 'acc1' plot structure) ---
+accuracy_plot <- ggplot(dat_summary_prop, aes(x = visit_in_casino, y = mean_prop, col = casino_factor, shape = casino_factor)) +
+  geom_point(size = 1.2) +
+  geom_line(size = 0.8) +
+  geom_errorbar(aes(ymin = mean_prop - se_prop, ymax = mean_prop + se_prop), width=0.2, size = 0.1) +
+  scale_color_manual(name = 'Casino', values = c("Casino 2" = "#88CDF6", "Casino 3" = "#66FF99")) +
+  scale_shape_manual(name = 'Casino', values = c("Casino 2" = 16, "Casino 3" = 17)) +
+  # ** Adjust Y scale for proportion/accuracy **
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+  scale_x_continuous(breaks = seq(0, max(dat_summary_prop$visit_in_casino, na.rm=TRUE), by = 5)) +
+  facet_wrap(~casino_factor, nrow = 1, scales = "fixed") + # Keep y-axis fixed (0-1) for accuracy comparison
+  # ** Update Labels **
+  labs(x = 'Visit Number within Casino', y = 'Proportion Choosing High-P Machine', title = "Learning Curve in Casinos 2 & 3") +
+  theme_minimal(base_family = base_font) + # Use defined base_font
+  theme(
+    legend.position = "top", legend.text = element_text(size = 10, face = "bold", family = base_font),
+    legend.title = element_text(size = 12, face = "bold", family = base_font),
+    panel.border = element_blank(), panel.grid.minor = element_blank(),
+    plot.title = element_text(hjust = 0.5, family = base_font, size=14, face="bold"),
+    axis.text.x = element_text(size = 10, family = base_font), axis.text.y = element_text(size = 10, family = base_font),
+    axis.title.x = element_text(size = 12, face = "bold", family = base_font), axis.title.y = element_text(size = 12, face = "bold", family = base_font),
+    strip.background = element_rect(color = "white", fill = "white"),
+    strip.text = element_text(size = 12, face = "bold", family = base_font),
+    axis.line = element_line(colour = "black"),
+    axis.title = element_text(size = 12, face = "bold", family = base_font)
+  )
+
+# Display the plot
+print(accuracy_plot)
+
+# ** Update the ggsave filename **
+ggsave(plot = accuracy_plot, filename = paste0(output_path, 'casino_2_3_accuracy_plot.pdf'), width = 7, height = 4)
+
+```

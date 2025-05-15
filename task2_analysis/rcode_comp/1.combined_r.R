@@ -1,0 +1,30 @@
+
+rm(list=ls())
+library(dplyr)
+
+file<-list.files("/Users/hroyhong/Desktop/llm0412/task1/data/logs_reward_complete//")
+path<-'/Users/hroyhong/Desktop/llm0412/task1/data/logs_reward_complete//'
+
+###combined data
+final<-NULL
+kk=0
+for (i in 1:length(file)){
+  kk=kk+1
+  dd<-paste(path,'/',file[i],sep='')
+  data<-read.csv(dd)
+  data<-data%>%
+    mutate(subj=kk)
+  final<-rbind(final,data)
+}
+unique(final$subject_id)
+
+
+###
+final<-final%>%
+  mutate(decision = case_when(
+    chosen_machine_label %in% c("Z", "M", "Q", "G") ~ 1,
+    TRUE ~ 2
+  ))
+
+# Write the final dataset to a CSV file 
+write.csv(final, "/Users/hroyhong/Desktop/llm0412/task1/data/combined_r_comp.csv", row.names = FALSE)
